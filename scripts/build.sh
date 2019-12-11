@@ -18,12 +18,12 @@ lapackpp_DIR=<FIXME: path to the root installation directory of LAPACKPP>
 #
 # DLAF_WITH_MKL    := ON | OFF (default)
 #
-# BUILD_DOC        := ON | OFF (default)
+# DLAF_BUILD_DOC   := ON | OFF (default)
 #
-# DLAF_WITH_TEST   := ON (default) | OFF
+# DLAF_BUILD_TEST  := ON (default) | OFF
 #
 cmake <FIXME: path to DLA-Future src directory> \
-  -D DLAF_WITH_MKL=ON \
-  -D CMAKE_BUILD_TYPE=RelWithDebugInfo \
+  -D DLAF_WITH_MKL=ON                           \
+  -D CMAKE_BUILD_TYPE=RelWithDebugInfo          \
 
 make <FIXME: targets to build>

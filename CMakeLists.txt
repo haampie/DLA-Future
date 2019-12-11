@@ -96,8 +96,8 @@ add_subdirectory(src)
 # ---------------------------------------------------------------------------
 # Test
 # ---------------------------------------------------------------------------
-set(DLAF_WITH_TEST ON CACHE BOOL "Enables tests")
-if (DLAF_WITH_TEST)
+set(DLAF_BUILD_TEST ON CACHE BOOL "Build tests")
+if (DLAF_BUILD_TEST)
   include(CTest)
   enable_testing()
 
@@ -107,7 +107,7 @@ endif()
 # ---------------------------------------------------------------------------
 # Docs
 # ---------------------------------------------------------------------------
-option(BUILD_DOC "Build documentation" OFF)
-if (BUILD_DOC)
+option(DLAF_BUILD_DOC "Build documentation" OFF)
+if (DLAF_BUILD_DOC)
   add_subdirectory(doc)
 endif()
