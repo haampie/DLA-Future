@@ -18,14 +18,23 @@
 
 using T = double;
 
-int hpx_main(int argc, char **argv) {
-  for(auto i = 0; i < argc; ++i)
-    std::cout << "[" << i << "] " << argv[i] << std::endl;
+struct options_t {
+  std::size_t m;
+  std::size_t mb;
+  std::size_t grid_rows;
+  std::size_t grid_cols;
+};
 
-  // init communicators
+options_t check_options(hpx::program_options::variables_map& vm, const std::size_t total_ranks);
+
+int hpx_main(hpx::program_options::variables_map& vm) {
   dlaf::comm::Communicator world(MPI_COMM_WORLD);
 
-  std::cout << world.rank() << std::endl;
+  // init communicators
+  options_t opts = check_options(vm, world.size());
+  dlaf::comm::CommunicatorGrid grid(world, opts.grid_rows, opts.grid_cols, dlaf::common::Ordering::ColumnMajor);
+
+  std::cout << world.rank() << " " << opts.m << " " << opts.mb << " " << opts.grid_rows << " " << opts.grid_cols  << std::endl;
 
   // init matrix (random)
 
@@ -53,14 +62,24 @@ int main(int argc, char **argv) {
   }
 
   // Configure application-specific options
-  hpx::program_options::options_description desc_commandline("Usage: " HPX_APPLICATION_STRING " [options]");
+  using namespace hpx::program_options;
+  options_description desc_commandline("Usage: " HPX_APPLICATION_STRING " [options]");
 
-  desc_commandline.add_options()
-    ("matrix",
-     hpx::program_options::value<std::uint64_t>()->default_value(10),
-     "n value for the Fibonacci function")
-    ;
   // options
+  desc_commandline.add_options()
+    ("matrix-size,m",
+     value<std::size_t>()->default_value(4096),
+     "Matrix size.")
+    ("block-size,nb",
+     value<std::size_t>()->default_value(128),
+     "Block cyclic distribution size.")
+    ("grid-rows,r",
+     value<std::size_t>()->default_value(1),
+     "Number of row processes in the 2D communicator.")
+    ("grid-cols,c",
+     value<std::size_t>()->default_value(1),
+     "Number of column processes in the 2D communicator.")
+    ;
   /*
     ("use-pools,u",     "Enable advanced HPX thread pools and executors")
     ("use-scheduler,s", "Enable custom priority scheduler")
@@ -69,22 +88,33 @@ int main(int argc, char **argv) {
       "Number of threads to assign to MPI")
     ("hp-queues,H", util::po::value<int>()->default_value(1),
       "Number of high priority queues to use in custom scheduler")
-    ("size,n", util::po::value<int>()->default_value(4096), "Matrix size.")
-    ("nb", util::po::value<int>()->default_value(128),
-      "Block cyclic distribution size.")
-    ("row-proc,p", util::po::value<int>()->default_value(1),
-      "Number of row processes in the 2D communicator.")
-    ("col-proc,q", util::po::value<int>()->default_value(1),
-      "Number of column processes in the 2D communicator.")
-    ("nruns", util::po::value<int>()->default_value(1), "number of runs")
-    ("no-check", "Disable result checking");
    */
 
-  auto ret_code = hpx::init(hpx_main, argc, argv);
+  auto ret_code = hpx::init(hpx_main, desc_commandline, argc, argv);
 
   // resources management/scheduler/pool
 
   MPI_Finalize();
 
   return ret_code;
+}
+
+options_t check_options(hpx::program_options::variables_map& vm, const std::size_t total_ranks) {
+  options_t opts = {
+    .m = vm["matrix-size"].as<std::size_t>(),
+    .mb = vm["block-size"].as<std::size_t>(),
+
+    .grid_rows = vm["grid-rows"].as<std::size_t>(),
+    .grid_cols = vm["grid-cols"].as<std::size_t>(),
+  };
+
+  if (opts.m <= 0) throw std::runtime_error("invalid matrix size");
+  if (opts.mb <= 0) throw std::runtime_error("invalid matrix block size");
+
+  std::size_t specified_ranks = opts.grid_rows * opts.grid_cols;
+
+  if (specified_ranks < total_ranks) std::cerr << "warning! you are using less ranks then existing\n";
+  if (specified_ranks > total_ranks) throw std::runtime_error("you are using more ranks then existing");
+
+  return opts;
 }
