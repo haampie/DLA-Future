@@ -13,34 +13,37 @@
 #include <mpi.h>
 #include <hpx/hpx_init.hpp>
 
-#include "dlaf/matrix.h"
 #include "dlaf/communication/communicator_grid.h"
+#include "dlaf/matrix.h"
 
 using T = double;
 
 struct options_t {
-  std::size_t m;
-  std::size_t mb;
-  std::size_t grid_rows;
-  std::size_t grid_cols;
+  int64_t m;
+  int64_t mb;
+  int64_t grid_rows;
+  int64_t grid_cols;
+  int64_t nruns;
 };
 
-options_t check_options(hpx::program_options::variables_map& vm, const std::size_t total_ranks);
+options_t check_options(hpx::program_options::variables_map& vm);
 
 int hpx_main(hpx::program_options::variables_map& vm) {
+  options_t opts = check_options(vm);
+
   dlaf::comm::Communicator world(MPI_COMM_WORLD);
-
-  // init communicators
-  options_t opts = check_options(vm, world.size());
-  dlaf::comm::CommunicatorGrid grid(world, opts.grid_rows, opts.grid_cols, dlaf::common::Ordering::ColumnMajor);
-
-  std::cout << world.rank() << " " << opts.m << " " << opts.mb << " " << opts.grid_rows << " " << opts.grid_cols  << std::endl;
+  dlaf::comm::CommunicatorGrid comm_grid(world, opts.grid_rows, opts.grid_cols,
+                                         dlaf::common::Ordering::ColumnMajor);
 
   // init matrix (random)
+  dlaf::GlobalElementSize matrix_size(opts.m, opts.m);
+  dlaf::TileElementSize block_size(opts.mb, opts.mb);
 
-  // run multiple times
-  for(; false;) {
+  dlaf::Matrix<T, dlaf::Device::CPU> matrix(matrix_size, block_size, comm_grid);
+
+  for (auto run_index = 0; run_index < opts.nruns; ++run_index) {
     // run cholesky
+    std::cout << "[" << run_index << "]" << std::endl;
 
     // print benchmark results
 
@@ -50,7 +53,7 @@ int hpx_main(hpx::program_options::variables_map& vm) {
   return hpx::finalize();
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   // Initialize MPI
   int threading_required = MPI_THREAD_SERIALIZED;
   int threading_provided;
@@ -61,60 +64,59 @@ int main(int argc, char **argv) {
     MPI_Abort(MPI_COMM_WORLD, 1);
   }
 
-  // Configure application-specific options
+  // options
   using namespace hpx::program_options;
   options_description desc_commandline("Usage: " HPX_APPLICATION_STRING " [options]");
 
-  // options
+  // clang-format off
   desc_commandline.add_options()
-    ("matrix-size,m",
-     value<std::size_t>()->default_value(4096),
+    ("matrix-size",
+     value<int64_t>()->default_value(4096),
      "Matrix size.")
-    ("block-size,nb",
-     value<std::size_t>()->default_value(128),
+    ("block-size",
+     value<int64_t>()->default_value(128),
      "Block cyclic distribution size.")
-    ("grid-rows,r",
-     value<std::size_t>()->default_value(1),
+    ("grid-rows",
+     value<int64_t>()->default_value(1),
      "Number of row processes in the 2D communicator.")
-    ("grid-cols,c",
-     value<std::size_t>()->default_value(1),
+    ("grid-cols",
+     value<int64_t>()->default_value(1),
      "Number of column processes in the 2D communicator.")
-    ;
-  /*
-    ("use-pools,u",     "Enable advanced HPX thread pools and executors")
-    ("use-scheduler,s", "Enable custom priority scheduler")
-    ("use-numa,a",      "Enable numa sensitive scheduling")
-    ("mpi-threads,m", util::po::value<int>()->default_value(1),
-      "Number of threads to assign to MPI")
-    ("hp-queues,H", util::po::value<int>()->default_value(1),
-      "Number of high priority queues to use in custom scheduler")
-   */
+    ("nruns",
+     value<int64_t>()->default_value(1),
+     "Number of runs to compute the cholesky")
+  ;
+  // clang-format on
 
   auto ret_code = hpx::init(hpx_main, desc_commandline, argc, argv);
 
-  // resources management/scheduler/pool
+  // TODO resources management/scheduler/pool
 
   MPI_Finalize();
 
   return ret_code;
 }
 
-options_t check_options(hpx::program_options::variables_map& vm, const std::size_t total_ranks) {
+options_t check_options(hpx::program_options::variables_map& vm) {
   options_t opts = {
-    .m = vm["matrix-size"].as<std::size_t>(),
-    .mb = vm["block-size"].as<std::size_t>(),
+      .m = vm["matrix-size"].as<int64_t>(),
+      .mb = vm["block-size"].as<int64_t>(),
 
-    .grid_rows = vm["grid-rows"].as<std::size_t>(),
-    .grid_cols = vm["grid-cols"].as<std::size_t>(),
+      .grid_rows = vm["grid-rows"].as<int64_t>(),
+      .grid_cols = vm["grid-cols"].as<int64_t>(),
+
+      .nruns = vm["nruns"].as<int64_t>(),
   };
 
-  if (opts.m <= 0) throw std::runtime_error("invalid matrix size");
-  if (opts.mb <= 0) throw std::runtime_error("invalid matrix block size");
+  if (opts.m <= 0)
+    throw std::runtime_error("matrix size must be a positive number");
+  if (opts.mb <= 0)
+    throw std::runtime_error("block size must be a positive number");
 
-  std::size_t specified_ranks = opts.grid_rows * opts.grid_cols;
-
-  if (specified_ranks < total_ranks) std::cerr << "warning! you are using less ranks then existing\n";
-  if (specified_ranks > total_ranks) throw std::runtime_error("you are using more ranks then existing");
+  if (opts.grid_rows <= 0)
+    throw std::runtime_error("number of grid rows must be a positive number");
+  if (opts.grid_cols <= 0)
+    throw std::runtime_error("number of grid columns must be a positive number");
 
   return opts;
 }
