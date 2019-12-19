@@ -17,6 +17,10 @@
 #include "dlaf/mc/cholesky.h"
 #include "dlaf/matrix.h"
 #include "dlaf/util_matrix.h"
+#include "dlaf_test/util_matrix.h"
+#include "dlaf_test/util_types.h"
+
+using namespace dlaf;
 
 using T = double;
 
@@ -26,72 +30,48 @@ struct options_t {
   int64_t grid_rows;
   int64_t grid_cols;
   int64_t nruns;
+  bool do_check;
 };
 
 options_t check_options(hpx::program_options::variables_map& vm);
 
-template <class T>
-void init_random_positive_definite(dlaf::Matrix<T, dlaf::Device::CPU>& matrix) {
-  using namespace dlaf;
+T analytical_input_matrix(const GlobalElementIndex& index);
+T analytical_result_matrix(const GlobalElementIndex& index);
+
+void setup_input_matrix(Matrix<T, Device::CPU>& matrix) {
+  using namespace dlaf_test::matrix_test;
 
   util_matrix::assertSizeSquare(matrix, __PRETTY_FUNCTION__, "matrix");
   util_matrix::assertBlocksizeSquare(matrix, __PRETTY_FUNCTION__, "matrix");
 
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<T> dis(-1., 1.); // TODO make seed different for each tile
+  set(matrix, analytical_input_matrix);
+}
 
-  auto& distribution = matrix.distribution();
+void cholesky_check(Matrix<T, Device::CPU>& matrix) {
+  using namespace dlaf_test;
 
-  const auto offset = 2 * matrix.size().cols();
-
-  for (SizeType local_tile_j = 0; local_tile_j < distribution.localNrTiles().cols(); ++local_tile_j) {
-    for (SizeType local_tile_i = 0; local_tile_i < distribution.localNrTiles().rows(); ++local_tile_i) {
-      LocalTileIndex current_tile{local_tile_i, local_tile_j};
-      matrix(current_tile).then(hpx::util::unwrapping(
-          [dis, gen](auto&& tile) mutable {
-            for (SizeType j = 0; j < tile.size().cols(); ++j)
-              for (SizeType i = 0; i < tile.size().rows(); ++i)
-                tile(TileElementIndex(i, j)) = dis(gen);
-          }));
-    }
-  }
-
-  for (SizeType global_j = 0; global_j < matrix.nrTiles().cols(); ++global_j) {
-    for (SizeType global_i = 0; global_i < matrix.nrTiles().rows(); ++global_i) {
-      GlobalTileIndex index_tile_diag{global_i, global_j};
-      const auto owner = distribution.rankGlobalTile(index_tile_diag);
-
-      if (owner != matrix.rankIndex())
-        continue;
-
-      matrix(index_tile_diag).then(hpx::util::unwrapping(
-            [offset](auto &&tile_diag) {
-              for (SizeType j = 0; j < tile_diag.size().cols(); ++j)
-                tile_diag(TileElementIndex(j, j)) += offset;
-            }));
-    }
-  }
+  CHECK_MATRIX_NEAR(analytical_result_matrix, matrix, 4 * (matrix.size().rows() + 1) * TypeUtilities<T>::error,
+      4 * (matrix.size().rows() + 1) * TypeUtilities<T>::error);
 }
 
 int hpx_main(hpx::program_options::variables_map& vm) {
   options_t opts = check_options(vm);
 
-  dlaf::comm::Communicator world(MPI_COMM_WORLD);
-  dlaf::comm::CommunicatorGrid comm_grid(world, opts.grid_rows, opts.grid_cols,
-                                         dlaf::common::Ordering::ColumnMajor);
+  comm::Communicator world(MPI_COMM_WORLD);
+  comm::CommunicatorGrid comm_grid(world, opts.grid_rows, opts.grid_cols,
+                                         common::Ordering::ColumnMajor);
 
   // Allocate memory for the matrix
-  dlaf::GlobalElementSize matrix_size(opts.m, opts.m);
-  dlaf::TileElementSize block_size(opts.mb, opts.mb);
+  GlobalElementSize matrix_size(opts.m, opts.m);
+  TileElementSize block_size(opts.mb, opts.mb);
 
-  dlaf::Matrix<T, dlaf::Device::CPU> matrix(matrix_size, block_size, comm_grid);
+  Matrix<T, Device::CPU> matrix(matrix_size, block_size, comm_grid);
 
   // Run choleksy
   for (auto run_index = 0; run_index < opts.nruns; ++run_index) {
     std::cout << "[" << run_index << "]" << std::endl;
 
-    init_random_positive_definite(matrix);
+    setup_input_matrix(matrix);
 
     // run cholesky
     cholesky(comm_grid, blas::Uplo::Lower, matrix);
@@ -100,7 +80,9 @@ int hpx_main(hpx::program_options::variables_map& vm) {
 
     // TODO print benchmark results
 
-    // TODO run test (optional)
+    // run test (optional)
+    if (opts.do_check)
+      cholesky_check(matrix);
   }
 
   return hpx::finalize();
@@ -138,6 +120,9 @@ int main(int argc, char** argv) {
     ("nruns",
      value<int64_t>()->default_value(1),
      "Number of runs to compute the cholesky")
+    ("check-result",
+     bool_switch()->default_value(false),
+     "Check the cholesky factorization (for each run)")
   ;
   // clang-format on
 
@@ -159,6 +144,8 @@ options_t check_options(hpx::program_options::variables_map& vm) {
       .grid_cols = vm["grid-cols"].as<int64_t>(),
 
       .nruns = vm["nruns"].as<int64_t>(),
+
+      .do_check = vm["check-result"].as<bool>(),
   };
 
   if (opts.m <= 0)
@@ -173,3 +160,37 @@ options_t check_options(hpx::program_options::variables_map& vm) {
 
   return opts;
 }
+
+// Note: The tile elements are chosen such that:
+// - res_ij = 1 / 2^(|i-j|) * exp(I*(-i+j)),
+// where I = 0 for real types or I is the complex unit for complex types.
+// Therefore the result should be:
+// a_ij = Sum_k(res_ik * ConjTrans(res)_kj) =
+//      = Sum_k(1 / 2^(|i-k| + |j-k|) * exp(I*(-i+j))),
+// where k = 0 .. min(i,j)
+// Therefore,
+// a_ij = (4^(min(i,j)+1) - 1) / (3 * 2^(i+j)) * exp(I*(-i+j))
+T analytical_input_matrix(const GlobalElementIndex& index) {
+  using namespace dlaf_test;
+
+  SizeType i = index.row();
+  SizeType j = index.col();
+  if (i < j)
+    return TypeUtilities<T>::element(-9.9, 0.0);
+
+  return TypeUtilities<T>::polar(
+      1./3 * (std::exp2(2 * std::min(i, j) + 2 - i - j) - std::exp2(-(i+j))), -i + j);
+};
+
+// Analytical results
+T analytical_result_matrix(const GlobalElementIndex& index) {
+  using namespace dlaf_test;
+
+  SizeType i = index.row();
+  SizeType j = index.col();
+  if (i < j)
+    return TypeUtilities<T>::element(-9.9, 0.0);
+
+  return TypeUtilities<T>::polar(std::exp2(-std::abs(i - j)), -i + j);
+};
+
