@@ -14,7 +14,9 @@
 #include <hpx/hpx_init.hpp>
 
 #include "dlaf/communication/communicator_grid.h"
+#include "dlaf/mc/cholesky.h"
 #include "dlaf/matrix.h"
+#include "dlaf/util_matrix.h"
 
 using T = double;
 
@@ -28,6 +30,50 @@ struct options_t {
 
 options_t check_options(hpx::program_options::variables_map& vm);
 
+template <class T>
+void init_random_positive_definite(dlaf::Matrix<T, dlaf::Device::CPU>& matrix) {
+  using namespace dlaf;
+
+  util_matrix::assertSizeSquare(matrix, __PRETTY_FUNCTION__, "matrix");
+  util_matrix::assertBlocksizeSquare(matrix, __PRETTY_FUNCTION__, "matrix");
+
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<T> dis(-1., 1.); // TODO make seed different for each tile
+
+  auto& distribution = matrix.distribution();
+
+  const auto offset = 2 * matrix.size().cols();
+
+  for (SizeType local_tile_j = 0; local_tile_j < distribution.localNrTiles().cols(); ++local_tile_j) {
+    for (SizeType local_tile_i = 0; local_tile_i < distribution.localNrTiles().rows(); ++local_tile_i) {
+      LocalTileIndex current_tile{local_tile_i, local_tile_j};
+      matrix(current_tile).then(hpx::util::unwrapping(
+          [dis, gen](auto&& tile) mutable {
+            for (SizeType j = 0; j < tile.size().cols(); ++j)
+              for (SizeType i = 0; i < tile.size().rows(); ++i)
+                tile(TileElementIndex(i, j)) = dis(gen);
+          }));
+    }
+  }
+
+  for (SizeType global_j = 0; global_j < matrix.nrTiles().cols(); ++global_j) {
+    for (SizeType global_i = 0; global_i < matrix.nrTiles().rows(); ++global_i) {
+      GlobalTileIndex index_tile_diag{global_i, global_j};
+      const auto owner = distribution.rankGlobalTile(index_tile_diag);
+
+      if (owner != matrix.rankIndex())
+        continue;
+
+      matrix(index_tile_diag).then(hpx::util::unwrapping(
+            [offset](auto &&tile_diag) {
+              for (SizeType j = 0; j < tile_diag.size().cols(); ++j)
+                tile_diag(TileElementIndex(j, j)) += offset;
+            }));
+    }
+  }
+}
+
 int hpx_main(hpx::program_options::variables_map& vm) {
   options_t opts = check_options(vm);
 
@@ -35,19 +81,26 @@ int hpx_main(hpx::program_options::variables_map& vm) {
   dlaf::comm::CommunicatorGrid comm_grid(world, opts.grid_rows, opts.grid_cols,
                                          dlaf::common::Ordering::ColumnMajor);
 
-  // init matrix (random)
+  // Allocate memory for the matrix
   dlaf::GlobalElementSize matrix_size(opts.m, opts.m);
   dlaf::TileElementSize block_size(opts.mb, opts.mb);
 
   dlaf::Matrix<T, dlaf::Device::CPU> matrix(matrix_size, block_size, comm_grid);
 
+  // Run choleksy
   for (auto run_index = 0; run_index < opts.nruns; ++run_index) {
-    // run cholesky
     std::cout << "[" << run_index << "]" << std::endl;
 
-    // print benchmark results
+    init_random_positive_definite(matrix);
 
-    // run test (optional)
+    // run cholesky
+    cholesky(comm_grid, blas::Uplo::Lower, matrix);
+
+    // TODO wait for last task and barrier for all ranks
+
+    // TODO print benchmark results
+
+    // TODO run test (optional)
   }
 
   return hpx::finalize();
