@@ -97,10 +97,27 @@ int hpx_main(hpx::program_options::variables_map& vm) {
 
       MPI_Barrier(world);
     }
+    auto elapsed_time = timeit.elapsed();
+
+    double gigaflops;
+    {
+      double n = matrix.size().rows();
+      double add_mul = n * n * n / 6;
+      static_assert(!std::is_same<T, double>::value || !std::is_same<T, float>::value, "FIX GIGAFLOPS");
+      gigaflops = 2 * add_mul / elapsed_time / 1e9;
+    }
 
     // print benchmark results
     if (0 == world.rank())
-      std::cout << timeit.elapsed() << std::endl;
+      std::cout
+        << "[" << run_index << "]"
+        << " " << elapsed_time << "s"
+        << " " << gigaflops << "GFlop/s"
+        << " " << matrix.size()
+        << " " << matrix.blockSize()
+        << " " << comm_grid.size()
+        << " " << hpx::get_os_thread_count()
+        << std::endl;
 
     // (optional) run test
     if (opts.do_check)
