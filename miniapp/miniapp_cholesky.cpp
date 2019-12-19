@@ -20,6 +20,8 @@
 #include "dlaf_test/util_matrix.h"
 #include "dlaf_test/util_types.h"
 
+#include "timer.h"
+
 using namespace dlaf;
 
 using T = double;
@@ -66,21 +68,39 @@ int hpx_main(hpx::program_options::variables_map& vm) {
   TileElementSize block_size(opts.mb, opts.mb);
 
   Matrix<T, Device::CPU> matrix(matrix_size, block_size, comm_grid);
+  auto distribution = matrix.distribution();
 
   // Run choleksy
   for (auto run_index = 0; run_index < opts.nruns; ++run_index) {
-    std::cout << "[" << run_index << "]" << std::endl;
+    if (0 == world.rank()) std::cout << "[" << run_index << "]" << std::endl;
 
     setup_input_matrix(matrix);
 
-    // run cholesky
+    // wait all setup tasks before starting benchmark
+    {
+      for (int local_tile_j = 0; local_tile_j < distribution.localNrTiles().cols(); ++local_tile_j)
+        for (int local_tile_i = 0; local_tile_i < distribution.localNrTiles().rows(); ++local_tile_i)
+          matrix(LocalTileIndex{local_tile_i, local_tile_j}).get();
+
+      MPI_Barrier(world);
+    }
+
+    common::timer<> timeit;
     cholesky(comm_grid, blas::Uplo::Lower, matrix);
 
-    // TODO wait for last task and barrier for all ranks
+    // wait for last task and barrier for all ranks
+    {
+      GlobalTileIndex last_tile(matrix.nrTiles().rows()-1, matrix.nrTiles().cols()-1);
+      if (matrix.rankIndex() == distribution.rankGlobalTile(last_tile))
+        matrix(last_tile).get();
 
-    // TODO print benchmark results
+      MPI_Barrier(world);
+    }
 
-    // run test (optional)
+    // print benchmark results
+    if (0 == world.rank()) std::cout << timeit.elapsed() << std::endl;
+
+    // (optional) run test
     if (opts.do_check)
       cholesky_check(matrix);
   }
