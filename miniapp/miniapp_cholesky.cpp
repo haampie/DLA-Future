@@ -14,8 +14,8 @@
 #include <hpx/hpx_init.hpp>
 
 #include "dlaf/communication/communicator_grid.h"
-#include "dlaf/mc/cholesky.h"
 #include "dlaf/matrix.h"
+#include "dlaf/mc/cholesky.h"
 #include "dlaf/util_matrix.h"
 #include "dlaf_test/util_matrix.h"
 #include "dlaf_test/util_types.h"
@@ -52,16 +52,16 @@ void setup_input_matrix(Matrix<T, Device::CPU>& matrix) {
 void cholesky_check(Matrix<T, Device::CPU>& matrix) {
   using namespace dlaf_test;
 
-  CHECK_MATRIX_NEAR(analytical_result_matrix, matrix, 4 * (matrix.size().rows() + 1) * TypeUtilities<T>::error,
-      4 * (matrix.size().rows() + 1) * TypeUtilities<T>::error);
+  CHECK_MATRIX_NEAR(analytical_result_matrix, matrix,
+                    4 * (matrix.size().rows() + 1) * TypeUtilities<T>::error,
+                    4 * (matrix.size().rows() + 1) * TypeUtilities<T>::error);
 }
 
 int hpx_main(hpx::program_options::variables_map& vm) {
   options_t opts = check_options(vm);
 
   comm::Communicator world(MPI_COMM_WORLD);
-  comm::CommunicatorGrid comm_grid(world, opts.grid_rows, opts.grid_cols,
-                                         common::Ordering::ColumnMajor);
+  comm::CommunicatorGrid comm_grid(world, opts.grid_rows, opts.grid_cols, common::Ordering::ColumnMajor);
 
   // Allocate memory for the matrix
   GlobalElementSize matrix_size(opts.m, opts.m);
@@ -72,7 +72,8 @@ int hpx_main(hpx::program_options::variables_map& vm) {
 
   // Run choleksy
   for (auto run_index = 0; run_index < opts.nruns; ++run_index) {
-    if (0 == world.rank()) std::cout << "[" << run_index << "]" << std::endl;
+    if (0 == world.rank())
+      std::cout << "[" << run_index << "]" << std::endl;
 
     setup_input_matrix(matrix);
 
@@ -90,7 +91,7 @@ int hpx_main(hpx::program_options::variables_map& vm) {
 
     // wait for last task and barrier for all ranks
     {
-      GlobalTileIndex last_tile(matrix.nrTiles().rows()-1, matrix.nrTiles().cols()-1);
+      GlobalTileIndex last_tile(matrix.nrTiles().rows() - 1, matrix.nrTiles().cols() - 1);
       if (matrix.rankIndex() == distribution.rankGlobalTile(last_tile))
         matrix(last_tile).get();
 
@@ -98,7 +99,8 @@ int hpx_main(hpx::program_options::variables_map& vm) {
     }
 
     // print benchmark results
-    if (0 == world.rank()) std::cout << timeit.elapsed() << std::endl;
+    if (0 == world.rank())
+      std::cout << timeit.elapsed() << std::endl;
 
     // (optional) run test
     if (opts.do_check)
@@ -198,8 +200,9 @@ T analytical_input_matrix(const GlobalElementIndex& index) {
   if (i < j)
     return TypeUtilities<T>::element(-9.9, 0.0);
 
-  return TypeUtilities<T>::polar(
-      1./3 * (std::exp2(2 * std::min(i, j) + 2 - i - j) - std::exp2(-(i+j))), -i + j);
+  return TypeUtilities<T>::polar(1. / 3 *
+                                     (std::exp2(2 * std::min(i, j) + 2 - i - j) - std::exp2(-(i + j))),
+                                 -i + j);
 };
 
 // Analytical results
@@ -213,4 +216,3 @@ T analytical_result_matrix(const GlobalElementIndex& index) {
 
   return TypeUtilities<T>::polar(std::exp2(-std::abs(i - j)), -i + j);
 };
-
