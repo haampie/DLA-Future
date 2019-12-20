@@ -82,12 +82,12 @@ int hpx_main(hpx::program_options::variables_map& vm) {
       for (int local_tile_j = 0; local_tile_j < distribution.localNrTiles().cols(); ++local_tile_j)
         for (int local_tile_i = 0; local_tile_i < distribution.localNrTiles().rows(); ++local_tile_i)
           matrix(LocalTileIndex{local_tile_i, local_tile_j}).get();
-
       MPI_Barrier(world);
     }
 
     common::timer<> timeit;
-    cholesky(comm_grid, blas::Uplo::Lower, matrix);
+    // cholesky(comm_grid, blas::Uplo::Lower, matrix);
+    cholesky(blas::Uplo::Lower, matrix);
 
     // wait for last task and barrier for all ranks
     {
@@ -109,15 +109,11 @@ int hpx_main(hpx::program_options::variables_map& vm) {
 
     // print benchmark results
     if (0 == world.rank())
-      std::cout
-        << "[" << run_index << "]"
-        << " " << elapsed_time << "s"
-        << " " << gigaflops << "GFlop/s"
-        << " " << matrix.size()
-        << " " << matrix.blockSize()
-        << " " << comm_grid.size()
-        << " " << hpx::get_os_thread_count()
-        << std::endl;
+      std::cout << "[" << run_index << "]"
+                << " " << elapsed_time << "s"
+                << " " << gigaflops << "GFlop/s"
+                << " " << matrix.size() << " " << matrix.blockSize() << " " << comm_grid.size() << " "
+                << hpx::get_os_thread_count() << std::endl;
 
     // (optional) run test
     if (opts.do_check)
@@ -164,6 +160,24 @@ int main(int argc, char** argv) {
      "Check the cholesky factorization (for each run)")
   ;
   // clang-format on
+
+  // Create the resource partitioner
+  hpx::resource::partitioner rp(desc_commandline, argc, argv);
+  // auto &topo = rp.get_topology();
+
+  int ntasks;
+  MPI_Comm_size(MPI_COMM_WORLD, &ntasks);
+
+  //
+  // if the user has asked for special thread pools for communication
+  // then set them up
+  //
+  if (ntasks > 1) {
+    // Create a thread pool with a single core that we will use for all
+    // communication related tasks
+    rp.create_thread_pool("mpi", hpx::resource::scheduling_policy::local_priority_fifo);
+    rp.add_resource(rp.numa_domains()[0].cores()[0].pus()[0], "mpi");
+  }
 
   auto ret_code = hpx::init(hpx_main, desc_commandline, argc, argv);
 
