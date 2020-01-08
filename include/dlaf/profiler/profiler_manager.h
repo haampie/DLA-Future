@@ -90,5 +90,17 @@ struct SectionScoped {
   details::task_data_t data_;
 };
 
+namespace util {
+
+template <class Func>
+auto unwrap(std::string name, std::string group, Func&& target_function) {
+  return [name, group, function=std::forward<Func>(target_function)](auto&&... args) -> auto {
+    SectionScoped _(name, group);
+    return function(std::forward<decltype(args)>(args)...);
+  };
+}
+
+}
+
 }
 }
