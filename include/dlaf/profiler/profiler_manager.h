@@ -93,7 +93,7 @@ struct SectionScoped {
 namespace util {
 
 template <class Func>
-auto unwrap(std::string name, std::string group, Func&& target_function) {
+auto time_it(std::string name, std::string group, Func&& target_function) {
   return [name, group, function=std::forward<Func>(target_function)](auto&&... args) -> auto {
     SectionScoped _(name, group);
     return function(std::forward<decltype(args)>(args)...);
