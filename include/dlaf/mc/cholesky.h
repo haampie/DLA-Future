@@ -21,7 +21,7 @@
 #include "dlaf/matrix.h"
 #include "dlaf/matrix/distribution.h"
 #include "dlaf/util_matrix.h"
-
+#include "dlaf/common/utils.h"
 #include "dlaf/profiler/profiler_manager.h"
 
 /// @file
@@ -42,6 +42,7 @@ static bool use_pools = true;
 template <class T>
 void cholesky(blas::Uplo uplo, Matrix<T, Device::CPU>& mat) {
   using dlaf::profiler::util::time_it;
+  using dlaf::common::utils::join;
 
   // Set up executor on the default queue with high priority.
   hpx::threads::scheduled_executor executor_hp =
@@ -67,13 +68,13 @@ void cholesky(blas::Uplo uplo, Matrix<T, Device::CPU>& mat) {
       auto kk = LocalTileIndex{k, k};
 
       hpx::dataflow(executor_hp,
-                    hpx::util::unwrapping(time_it("potrf", "ops", tile::potrf<T, Device::CPU>)), uplo,
+                    hpx::util::unwrapping(time_it(join("HP Fact. Diag Block", k), "potrf", tile::potrf<T, Device::CPU>)), uplo,
                     std::move(mat(kk)));
 
       for (SizeType i = k + 1; i < nrtile; ++i) {
         // Update panel mat(i,k) with trsm (blas operation), using data mat.read(k,k)
         hpx::dataflow(executor_hp,
-                      hpx::util::unwrapping(time_it("trsm", "ops", tile::trsm<T, Device::CPU>)),
+                      hpx::util::unwrapping(time_it(join("HP Update Panel", k, i), "trsm", tile::trsm<T, Device::CPU>)),
                       blas::Side::Right, uplo, blas::Op::ConjTrans, blas::Diag::NonUnit, 1.0,
                       mat.read(kk), std::move(mat(LocalTileIndex{i, k})));
       }
@@ -84,7 +85,7 @@ void cholesky(blas::Uplo uplo, Matrix<T, Device::CPU>& mat) {
 
         // Update trailing matrix: diagonal element mat(j,j, reading mat.read(j,k), using herk (blas operation)
         hpx::dataflow(trailing_matrix_executor,
-                      hpx::util::unwrapping(time_it("herk", "ops", tile::herk<T, Device::CPU>)), uplo,
+                      hpx::util::unwrapping(time_it(join("Update Diag Trailing Matrix", k, j, j), "herk", tile::herk<T, Device::CPU>)), uplo,
                       blas::Op::NoTrans, -1.0, mat.read(LocalTileIndex{j, k}), 1.0,
                       std::move(mat(LocalTileIndex{j, j})));
 
@@ -92,7 +93,7 @@ void cholesky(blas::Uplo uplo, Matrix<T, Device::CPU>& mat) {
           // Update remaining trailing matrix mat(i,j), reading mat.read(i,k) and mat.read(j,k), using
           // gemm (blas operation)
           hpx::dataflow(trailing_matrix_executor,
-                        hpx::util::unwrapping(time_it("gemm", "ops", tile::gemm<T, Device::CPU>)),
+                        hpx::util::unwrapping(time_it(join("Update Trailing Matrix", k, j, i), "gemm", tile::gemm<T, Device::CPU>)),
                         blas::Op::NoTrans, blas::Op::ConjTrans, -1.0, mat.read(LocalTileIndex{i, k}),
                         mat.read(LocalTileIndex{j, k}), 1.0, std::move(mat(LocalTileIndex{i, j})));
         }
