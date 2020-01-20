@@ -119,3 +119,6 @@ option(DLAF_BUILD_DOC "Build documentation" OFF)
 if (DLAF_BUILD_DOC)
   add_subdirectory(doc)
 endif()
+
+add_executable(benchmark_blas test_blas.cpp)
+target_link_libraries(benchmark_blas PRIVATE blaspp)
