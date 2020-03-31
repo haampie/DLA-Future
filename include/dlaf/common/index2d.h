@@ -13,9 +13,10 @@
 /// @file
 
 #include <array>
-#include <cassert>
 #include <ostream>
 #include <type_traits>
+
+#include "dlaf/common/assert.h"
 
 namespace dlaf {
 
@@ -125,7 +126,7 @@ public:
   /// @brief Returns true if rows() == 0 or cols() == 0
   /// @pre isValid() == true
   bool isEmpty() const noexcept {
-    assert(internal::basic_coords<IndexT>::isValid());
+    DLAF_ASSERT_HEAVY((internal::basic_coords<IndexT>::isValid()));
     return rows() == 0 || cols() == 0;
   }
 };

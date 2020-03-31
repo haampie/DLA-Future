@@ -12,9 +12,10 @@
 
 /// @file
 
-#include <cassert>
 #include <complex>
 #include <limits>
+
+#include "dlaf/common/assert.h"
 
 namespace dlaf {
 
@@ -88,7 +89,7 @@ template <class S, class U,
                                std::is_integral<S>::value && std::is_signed<S>::value,
                            int> = 0>
 S to_signed(const U unsigned_value) {
-  assert(std::numeric_limits<S>::max() > unsigned_value);
+  DLAF_ASSERT_HEAVY((std::numeric_limits<S>::max() > unsigned_value));
   return static_cast<S>(unsigned_value);
 }
 
@@ -101,8 +102,8 @@ template <class U, class S,
                                std::is_integral<S>::value && std::is_signed<S>::value,
                            int> = 0>
 U to_unsigned(const S signed_value) {
-  assert(signed_value >= 0);
-  assert(std::numeric_limits<U>::max() >= static_cast<std::size_t>(signed_value));
+  DLAF_ASSERT_HEAVY((signed_value >= 0));
+  DLAF_ASSERT_HEAVY((std::numeric_limits<U>::max() >= static_cast<std::size_t>(signed_value)));
   return static_cast<U>(signed_value);
 }
 
